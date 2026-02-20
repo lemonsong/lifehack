@@ -19,7 +19,7 @@ VOICE_FOLDER = "/Users/yilin/Documents/Read - Voice"
 BOOK_NAME = "不为人知的金融怪杰：11位市场交易奇才的故事"
 EPUB_PATH = f"{BOOK_FOLDER}/{BOOK_NAME}.epub"
 OUTPUT_FOLDER = f"{VOICE_FOLDER}/{BOOK_NAME}"
-REVIEW_FOLDER = f"{OUTPUT_FOLDER}/review"
+SCRIPT_FOLDER = f"{OUTPUT_FOLDER}/script"
 # VOICE = "zh-CN-YunyangNeural"  # 稳重男声（财经首选）
 VOICE = "en-GB-SoniaNeural"
 
@@ -46,6 +46,14 @@ def clean_text(text):
     text = re.sub(r'\n+', '\n', text)
     text = re.sub(r' +', ' ', text)
     return text.strip()
+
+
+def sanitize_for_filename(s, max_len=60):
+    """Make string safe for use in filenames."""
+    s = re.sub(r'[/\\:*?"<>|]', '_', s)
+    s = re.sub(r'\s+', '_', s)
+    s = re.sub(r'_+', '_', s).strip('_')
+    return (s[:max_len] if s else "chapter") or "chapter"
 
 
 def _extract_first_heading(soup):
@@ -90,11 +98,11 @@ def get_chapters_from_epub(epub_path):
 
 
 def run_extract():
-    """Extract text from epub to review folder, skipping preface."""
+    """Extract text from epub to script folder, skipping preface."""
     if not os.path.exists(EPUB_PATH):
         print(f"❌ EPUB 文件不存在：{EPUB_PATH}")
         return
-    os.makedirs(REVIEW_FOLDER, exist_ok=True)
+    os.makedirs(SCRIPT_FOLDER, exist_ok=True)
     print("正在读取 EPUB...")
     chapters = get_chapters_from_epub(EPUB_PATH)
     manifest_lines = []
@@ -104,33 +112,36 @@ def run_extract():
             manifest_lines.append(f"(skipped) {title} [preface]")
             continue
         idx += 1
-        filename = f"chapter_{idx:02d}.txt"
-        filepath = os.path.join(REVIEW_FOLDER, filename)
+        safe_title = sanitize_for_filename(title)
+        filename = f"chapter_{idx:02d}_{safe_title}.txt"
+        filepath = os.path.join(SCRIPT_FOLDER, filename)
         content = f"# {title}\n\n{text}"
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
         manifest_lines.append(f"{idx:02d} - {title}")
         print(f"✅ 已导出：{filename}")
-    manifest_path = os.path.join(REVIEW_FOLDER, "manifest.txt")
+    manifest_path = os.path.join(SCRIPT_FOLDER, "manifest.txt")
     with open(manifest_path, "w", encoding="utf-8") as f:
         f.write("\n".join(manifest_lines))
     print(f"\n📖 共导出 {idx} 个章节（已跳过前言）")
-    print(f"📁 文本已保存至：{REVIEW_FOLDER}")
+    print(f"📁 文本已保存至：{SCRIPT_FOLDER}")
     print("   请手动检查编辑后，运行 generate 生成音频")
 
 
-def get_review_chapters():
-    """Get (idx, text) for each chapter .txt in review folder, sorted."""
-    if not os.path.exists(REVIEW_FOLDER):
+def get_script_chapters():
+    """Get (idx, title, text) for each chapter .txt in script folder, sorted."""
+    if not os.path.exists(SCRIPT_FOLDER):
         return []
-    files = sorted(glob.glob(os.path.join(REVIEW_FOLDER, "chapter_*.txt")))
+    files = sorted(glob.glob(os.path.join(SCRIPT_FOLDER, "chapter_*.txt")))
     result = []
     for fp in files:
         basename = os.path.basename(fp)
-        match = re.match(r"chapter_(\d+)\.txt", basename)
+        # chapter_02.txt or chapter_02_Title_Here.txt
+        match = re.match(r"chapter_(\d+)(?:_(.+))?\.txt$", basename)
         if not match:
             continue
         idx = int(match.group(1))
+        title_part = match.group(2) or ""
         with open(fp, "r", encoding="utf-8") as f:
             content = f.read()
         # Strip optional # title header line for SSML
@@ -139,13 +150,19 @@ def get_review_chapters():
             text = "\n".join(lines[1:]).strip()
         else:
             text = content.strip()
-        result.append((idx, text))
+        result.append((idx, title_part, text))
     return sorted(result, key=lambda x: x[0])
 
 
-async def text_to_mp3(text, chapter_idx, total):
-    filename = f"第{chapter_idx:02d}章_财经有声书.mp3"
-    filepath = os.path.join(OUTPUT_FOLDER, filename)
+AUDIO_FOLDER = f"{OUTPUT_FOLDER}/audio"
+
+
+async def text_to_mp3(text, chapter_idx, total, title_suffix=""):
+    safe_title = sanitize_for_filename(title_suffix) if title_suffix else ""
+    name_part = f"_{safe_title}" if safe_title else "_财经有声书"
+    filename = f"第{chapter_idx:02d}章{name_part}.mp3"
+    os.makedirs(AUDIO_FOLDER, exist_ok=True)
+    filepath = os.path.join(AUDIO_FOLDER, filename)
 
     # 财经专用 SSML：稳重、有停顿、专业
     ssml = f'''
@@ -173,32 +190,32 @@ async def text_to_mp3(text, chapter_idx, total):
 
 
 async def run_generate_all():
-    """Generate audio for all chapters in review folder."""
-    chapters = get_review_chapters()
+    """Generate audio for all chapters in script folder."""
+    chapters = get_script_chapters()
     if not chapters:
-        print("❌ review 文件夹为空或不存在，请先运行：python epub_to_mp3.py extract")
+        print("❌ script 文件夹为空或不存在，请先运行：python epub_to_mp3.py extract")
         return
     total = len(chapters)
     print(f"📖 共 {total} 个章节待生成\n")
-    for idx, text in chapters:
-        await text_to_mp3(text, idx, total)
-    print(f"\n🎉 全部完成！音频在：{OUTPUT_FOLDER}")
+    for idx, title_part, text in chapters:
+        await text_to_mp3(text, idx, total, title_part)
+    print(f"\n🎉 全部完成！音频在：{AUDIO_FOLDER}")
 
 
 async def run_generate_chapter(chapter_num):
     """Generate audio for a single chapter."""
-    chapters = get_review_chapters()
+    chapters = get_script_chapters()
     if not chapters:
-        print("❌ review 文件夹为空或不存在，请先运行：python epub_to_mp3.py extract")
+        print("❌ script 文件夹为空或不存在，请先运行：python epub_to_mp3.py extract")
         return
-    match = [(i, t) for i, t in chapters if i == chapter_num]
+    match = [(i, t, x) for i, t, x in chapters if i == chapter_num]
     if not match:
-        valid = [i for i, _ in chapters]
+        valid = [i for i, _, _ in chapters]
         print(f"❌ 未找到章节 {chapter_num}，可用章节：{valid}")
         return
-    idx, text = match[0]
+    idx, title_part, text = match[0]
     total = len(chapters)
-    await text_to_mp3(text, idx, total)
+    await text_to_mp3(text, idx, total, title_part)
     print(f"\n🎉 已生成第 {idx} 章")
 
 
@@ -206,9 +223,9 @@ def main():
     parser = argparse.ArgumentParser(description="epub 转有声书")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("extract", help="从 epub 提取文本到 review 文件夹，跳过前言")
+    subparsers.add_parser("extract", help="从 epub 提取文本到 script 文件夹，跳过前言")
 
-    gen = subparsers.add_parser("generate", help="从 review 文件夹生成音频")
+    gen = subparsers.add_parser("generate", help="从 script 文件夹生成音频")
     gen.add_argument("--all", action="store_true", help="生成所有章节")
     gen.add_argument("--chapter", type=int, metavar="N", help="仅生成第 N 章")
 
