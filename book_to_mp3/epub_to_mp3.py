@@ -20,9 +20,19 @@ BOOK_NAME = "不为人知的金融怪杰：11位市场交易奇才的故事"
 EPUB_PATH = f"{BOOK_FOLDER}/{BOOK_NAME}.epub"
 OUTPUT_FOLDER = f"{VOICE_FOLDER}/{BOOK_NAME}"
 SCRIPT_FOLDER = f"{OUTPUT_FOLDER}/script"
-# VOICE = "zh-CN-YunyangNeural"  # 稳重男声（财经首选）
-VOICE = "en-GB-SoniaNeural"
-
+'''
+optional voice
+zh-CN-XiaoxiaoNeural               Female    News, Novel            Warm
+zh-CN-XiaoyiNeural                 Female    Cartoon, Novel         Lively
+zh-CN-YunjianNeural                Male      Sports,  Novel         Passion
+zh-CN-YunxiNeural                  Male      Novel                  Lively, Sunshine
+zh-CN-YunxiaNeural                 Male      Cartoon, Novel         Cute
+zh-CN-YunyangNeural                Male      News                   Professional, Reliable
+zh-CN-liaoning-XiaobeiNeural       Female    Dialect                Humorous
+zh-CN-shaanxi-XiaoniNeural         Female    Dialect                Bright
+'''
+VOICE = "zh-CN-YunyangNeural"  # 稳重男声（财经首选）
+# VOICE = "en-GB-SoniaNeural"
 # VOICE = "zh-CN-YunxiaNeural"  # 干练女声
 
 # 财经语速：稍慢、清晰、专业
@@ -160,29 +170,18 @@ AUDIO_FOLDER = f"{OUTPUT_FOLDER}/audio"
 async def text_to_mp3(text, chapter_idx, total, title_suffix=""):
     safe_title = sanitize_for_filename(title_suffix) if title_suffix else ""
     name_part = f"_{safe_title}" if safe_title else "_财经有声书"
-    filename = f"第{chapter_idx:02d}章{name_part}.mp3"
+    filename = f"{chapter_idx:02d}_{name_part}.mp3"
     os.makedirs(AUDIO_FOLDER, exist_ok=True)
     filepath = os.path.join(AUDIO_FOLDER, filename)
 
-    # 财经专用 SSML：稳重、有停顿、专业
-    ssml = f'''
-<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">
+    # SSML: voice + prosody only, script text as-is (no intro/outro)
+    ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">
 <voice name="{VOICE}">
 <prosody rate="{RATE}" pitch="{PITCH}" volume="medium">
-
-<break time="700ms"/>
-第{chapter_idx}章
-<break time="800ms"/>
-
 {text}
-
-<break time="1000ms"/>
-本章节播讲完毕，感谢您的收听。
-
 </prosody>
 </voice>
-</speak>
-    '''
+</speak>'''
 
     communicate = edge_tts.Communicate(ssml, voice=VOICE)
     await communicate.save(filepath)
